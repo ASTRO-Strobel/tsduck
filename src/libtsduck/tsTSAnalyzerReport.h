@@ -124,6 +124,13 @@ namespace ts {
         //!
         void reportNormalized(std::ostream& strm, const UString& title = UString());
 
+        //!
+        //! This methods displays a JSON report.
+        //! @param [in,out] strm Output text stream.
+        //! @param [in] title Title string to display.
+        //!
+        void reportJson(std::ostream& strm, const UString& title = UString());
+
     private:
         // Display header of a service PID list.
         void reportServiceHeader(Grid& grid, const UString& usage, bool scrambled, BitRate bitrate, BitRate ts_bitrate, bool wide) const;
@@ -142,5 +149,8 @@ namespace ts {
 
         // Display one normalized line of a time value.
         static void reportNormalizedTime(std::ostream&, const Time&, const char* type, const UString& country = UString());
+
+        // Display one json line of a time value.
+        static void reportJsonTime(std::ostream&, const Time&, const char* type, bool* first, const UString& country = UString());
     };
 }

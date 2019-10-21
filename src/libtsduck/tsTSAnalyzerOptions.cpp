@@ -49,6 +49,7 @@ ts::TSAnalyzerOptions::TSAnalyzerOptions() :
     table_analysis(false),
     error_analysis(false),
     normalized(false),
+	json(false),
     service_list(false),
     pid_list(false),
     global_pid_list(false),
@@ -104,6 +105,11 @@ void ts::TSAnalyzerOptions::defineArgs(Args &args) const
     args.help(u"normalized",
               u"Complete report about the transport stream, the services and the "
               u"PID's in a normalized output format (useful for automatic analysis).");
+
+    args.option(u"json");
+    args.help(u"json",
+              u"Complete report about the transport stream, the services and the "
+              u"PID's in a json output format (useful for automatic analysis).");
 
     args.option(u"service-list");
     args.help(u"service-list", u"Report the list of all service ids.");
@@ -184,6 +190,7 @@ bool ts::TSAnalyzerOptions::loadArgs(DuckContext &duck, Args &args)
     table_analysis = args.present(u"table-analysis");
     error_analysis = args.present(u"error-analysis");
     normalized = args.present(u"normalized");
+    json = args.present(u"json");
     service_list = args.present(u"service-list");
     pid_list = args.present(u"pid-list");
     global_pid_list = args.present(u"global-pid-list");
@@ -203,6 +210,7 @@ bool ts::TSAnalyzerOptions::loadArgs(DuckContext &duck, Args &args)
         !table_analysis &&
         !error_analysis &&
         !normalized &&
+		!json &&
         !service_list &&
         !pid_list &&
         !global_pid_list &&

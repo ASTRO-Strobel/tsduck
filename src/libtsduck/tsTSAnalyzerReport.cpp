@@ -179,6 +179,11 @@ void ts::TSAnalyzerReport::report(std::ostream& stm, const TSAnalyzerOptions& op
     if (opt.normalized) {
         reportNormalized(stm, opt.title);
     }
+
+    // JSON report.
+    if (opt.json) {
+    	reportJson(stm, opt.title);
+    }
 }
 
 
@@ -1054,4 +1059,313 @@ void ts::TSAnalyzerReport::reportNormalized(std::ostream& stm, const UString& ti
             stm << std::endl;
         }
     }
+}
+
+
+//----------------------------------------------------------------------------
+// This static method displays a Json time value.
+//----------------------------------------------------------------------------
+
+void ts::TSAnalyzerReport::reportJsonTime(std::ostream& stm, const Time& time, const char* type, bool* first, const UString& country)
+{
+    if (time != Time::Epoch) {
+        const Time::Fields f(time);
+        stm <<  (*first ? "" : "," ) << "\"" << type << "\": {"
+            << "\"date\": " << UString::Format(u"\"%02d/%02d/%04d\",", {f.day, f.month, f.year})
+        	<< "\"time\": " << UString::Format(u"\"%02dh%02dm%02ds\",", {f.hour, f.minute, f.second})
+            << "\"secondsince2000\":\"" << ((time - Time(2000, 1, 1, 0, 0, 0)) / MilliSecPerSec) << ((!country.empty()) ? "\"," :"\"");
+        if (!country.empty()) {
+            stm << "\"country\": \"" << country << "\"";
+        }
+        stm << "}" << std::endl;
+        *first = false;
+    }
+}
+
+
+//----------------------------------------------------------------------------
+// This method displays a Json report.
+//----------------------------------------------------------------------------
+
+void ts::TSAnalyzerReport::reportJson(std::ostream& stm, const UString& title)
+{
+    // Update the global statistics value if internal data were modified.
+
+    recomputeStatistics();
+
+    // Print one line with user-supplied title
+
+    stm << "{\"title\": \"" << title << "\"," << std::endl;
+
+    // Print one line with transport stream description
+
+    stm << "\"ts\": {";
+    if (_ts_id_valid) {
+        stm << "\"id\":" << _ts_id << ",";
+    }
+    stm << "\"services\":" << _services.size() << ","
+        << "\"clearservices\":" << (_services.size() - _scrambled_services_cnt) << ","
+        << "\"scrambledservices\":" << _scrambled_services_cnt << ","
+        << "\"pids\":" << _pid_cnt << ","
+        << "\"clearpids\":" << (_pid_cnt - _scrambled_pid_cnt) << ","
+        << "\"scrambledpids\":" << _scrambled_pid_cnt << ","
+        << "\"pcrpids\":" << _pcr_pid_cnt << ","
+        << "\"unreferencedpids\":" << _unref_pid_cnt << ","
+        << "\"packets\":" << _ts_pkt_cnt << ","
+        << "\"invalidsyncs\":" << _invalid_sync << ","
+        << "\"transporterrors\":" << _transport_errors << ","
+        << "\"suspectignored\":" << _suspect_ignored << ","
+        << "\"bytes\":" << (PKT_SIZE * _ts_pkt_cnt) << ","
+        << "\"bitrate\":" << _ts_bitrate << ","
+        << "\"bitrate204\":" << ToBitrate204(_ts_bitrate) << ","
+        << "\"userbitrate\":" << _ts_user_bitrate << ","
+        << "\"userbitrate204\":" << ToBitrate204(_ts_user_bitrate) << ","
+        << "\"pcrbitrate\":" << _ts_pcr_bitrate_188 << ","
+        << "\"pcrbitrate204\":" << _ts_pcr_bitrate_204 << ","
+        << "\"duration\":" << (_duration / 1000);
+    if (!_country_code.empty()) {
+        stm << "," << "\"country\":" << _country_code;
+    }
+    stm << "}," << std::endl;
+
+    bool first = true;
+    stm << "\"time\": {";
+		reportJsonTime(stm, _first_tdt, "utc_tdt_first", &first);
+		reportJsonTime(stm, _last_tdt, "utc_tdt_last", &first);
+		reportJsonTime(stm, _first_tot, "local_tot_first", &first, _country_code);
+		reportJsonTime(stm, _last_tot, "local_tot_last", &first, _country_code);
+		reportJsonTime(stm, _first_utc, "utc_system_first", &first);
+		reportJsonTime(stm, _last_utc, "utc_system_last", &first);
+		reportJsonTime(stm, _first_local, "local_system_first", &first);
+		reportJsonTime(stm, _last_local, "local_system_last", &first);
+    stm << "}," << std::endl;
+
+    stm << "\"global\": {"
+        << "\"pids\":" << _global_pid_cnt << ","
+        << "\"clearpids\":" << (_global_pid_cnt - _global_scr_pids) << ","
+        << "\"scrambledpids\":" << _global_scr_pids << ","
+        << "\"packets\":" << _global_pkt_cnt << ","
+        << "\"bitrate\":" << _global_bitrate << ","
+        << "\"bitrate204\":" << ToBitrate204(_global_bitrate) << ","
+        << "\"access\":" << (_global_scr_pids > 0 ? "\"scrambled\"" : "\"clear\"") << ","
+        << "\"pidlist\": [";
+    first = true;
+    for (PIDContextMap::const_iterator it = _pids.begin(); it != _pids.end(); ++it) {
+        const PIDContext& pc(*it->second);
+        if (pc.referenced && pc.services.size() == 0 && (pc.ts_pkt_cnt != 0 || !pc.optional)) {
+            stm << ((first) ? "" : ", ") << pc.pid;
+            first = false;
+        }
+    }
+    stm << "]}," << std::endl;
+
+    stm << "\"unreferenced\": {"
+        << "\"pids\":" << _unref_pid_cnt << ","
+        << "\"clearpids\":" << (_unref_pid_cnt - _unref_scr_pids) << ","
+        << "\"scrambledpids\":" << _unref_scr_pids << ","
+        << "\"packets\":" << _unref_pkt_cnt << ","
+        << "\"bitrate\":" << _unref_bitrate << ","
+        << "\"bitrate204\":" << ToBitrate204(_unref_bitrate) << ","
+        << "\"access\":" << (_unref_scr_pids > 0 ? "\"scrambled\"" : "\"clear\"")  << ","
+        << "\"pidlist\": [";
+    first = true;
+    for (PIDContextMap::const_iterator it = _pids.begin(); it != _pids.end(); ++it) {
+        const PIDContext& pc (*it->second);
+        if (!pc.referenced && (pc.ts_pkt_cnt != 0 || !pc.optional)) {
+            stm << ((first) ? "" : ", ") << pc.pid;
+            first = false;
+        }
+    }
+    stm << "]}," << std::endl;
+
+    stm << "\"service\": [";
+    bool first_service = true;
+    for (ServiceContextMap::const_iterator it = _services.begin(); it != _services.end(); ++it) {
+        const ServiceContext& sv(*it->second);
+        stm << ((first_service) ? "" : ", ");
+        first_service = false;
+        stm << "{\"id\":" << sv.service_id << ","
+            << "\"tsid\":" << _ts_id << ","
+            << "\"orignetwid\":" << sv.orig_netw_id << ","
+            << "\"access\":" << (sv.scrambled_pid_cnt > 0 ? "\"scrambled\"" : "\"clear\"") << ","
+            << "\"pids\":" << sv.pid_cnt << ","
+            << "\"clearpids\":" << (sv.pid_cnt - sv.scrambled_pid_cnt) << ","
+            << "\"scrambledpids\":" << sv.scrambled_pid_cnt << ","
+            << "\"packets\":" << sv.ts_pkt_cnt << ","
+            << "\"bitrate\":" << sv.bitrate << ","
+            << "\"bitrate204\":" << ToBitrate204(sv.bitrate) << ","
+            << "\"servtype\":" << int(sv.service_type) << ",";
+        if (sv.carry_ssu) {
+            stm << "\"ssu\":true,";
+        }
+        if (sv.carry_t2mi) {
+            stm << "\"t2mi\":true,";
+        }
+        if (sv.pmt_pid != 0) {
+            stm << "\"pmtpid\":" << sv.pmt_pid << ",";
+        }
+        if (sv.pcr_pid != 0 && sv.pcr_pid != PID_NULL) {
+            stm << "\"pcrpid\":" << sv.pcr_pid << ",";
+        }
+        stm << "\"pidlist\": [";
+        first = true;
+        for (PIDContextMap::const_iterator it_pid = _pids.begin(); it_pid != _pids.end(); ++it_pid) {
+            if (it_pid->second->services.count(sv.service_id) != 0) {
+                // This PID belongs to the service
+                stm << ((first) ? "" : ", ") << it_pid->first;
+                first = false;
+            }
+        }
+        stm << "],";
+        stm << "\"provider\":\"" << sv.getProvider() << "\","
+            << "\"name\":\"" << sv.getName() << "\""
+		    << "}" << std::endl;
+    }
+    stm << "]," << std::endl;
+
+    stm << "\"pid\": [";
+    bool first_pid = true;
+    for (PIDContextMap::const_iterator it = _pids.begin(); it != _pids.end(); ++it) {
+        const PIDContext& pc(*it->second);
+        if (pc.ts_pkt_cnt == 0 && pc.optional) {
+            continue;
+        }
+        stm << ((first_pid) ? "" : ", ");
+        first_pid = false;
+        stm << "{\"pid\":" << pc.pid  << ",";
+        if (pc.is_pmt_pid) {
+        	stm << "\"pmt\":true,";
+        }
+        if (pc.carry_ecm) {
+        	stm << "\"ecm\":true,";
+        }
+        if (pc.carry_emm) {
+        	stm << "\"emm\":true,";
+        }
+        if (pc.cas_id != 0) {
+            stm << "\"cas\":" << pc.cas_id << ",";
+        }
+        for (std::set<uint32_t>::const_iterator it2 = pc.cas_operators.begin(); it2 != pc.cas_operators.end(); ++it2) {
+            stm << "\"operator\":\"" << (*it2) << "\",";
+        }
+        stm << "\"access\":" << (pc.scrambled ? "\"scrambled\"" : "\"clear\"") << ",";
+        if (pc.crypto_period != 0 && _ts_bitrate != 0) {
+            stm << "\"cryptoperiod\":" << ((pc.crypto_period * PKT_SIZE * 8) / _ts_bitrate) << ",";
+        }
+        if (pc.same_stream_id) {
+            stm << "\"streamid\":" << int (pc.pes_stream_id) << ",";
+        }
+        if (pc.carry_audio) {
+            stm << "\"audio\":true,";
+        }
+        if (pc.carry_video) {
+        	 stm << "\"video\":true,";
+        }
+        if (!pc.language.empty()) {
+            stm << "\"language\":\"" << pc.language << "\",";
+        }
+        stm << "\"servcount\":" << pc.services.size() << ",";
+        if (!pc.referenced) {
+            stm << "\"unreference\":true,";
+        }
+        else if ((pc.services.size() == 0)) {
+            stm << "\"global\":true,";
+        }
+        else {
+            stm << "\"servlist\": [";
+            first = true;
+            for (ServiceIdSet::const_iterator it1 = pc.services.begin(); it1 != pc.services.end(); ++it1) {
+                stm << (first ? "" : ", ") << *it1;
+                first = false;
+            }
+            stm << "],";
+        }
+        if (pc.ssu_oui.begin() != pc.ssu_oui.end()) {
+        stm << "\"ssuoui\": [";
+            first = true;
+            for (std::set<uint32_t>::const_iterator it1 = pc.ssu_oui.begin(); it1 != pc.ssu_oui.end(); ++it1) {
+                stm << (first ? "" : ", ") << *it1;
+                first = false;
+            }
+            stm << "],";
+        }
+        if (pc.carry_t2mi) {
+            stm << "\"t2mi\": true,";
+            if (pc.t2mi_plp_ts.begin() != pc.t2mi_plp_ts.end()) {
+                stm << "\"plp\" : [";
+                first = true;
+                for (std::map<uint8_t, uint64_t>::const_iterator it1 = pc.t2mi_plp_ts.begin(); it1 != pc.t2mi_plp_ts.end(); ++it1) {
+                    stm << (first ? "" : ", ") << int(it1->first);
+                    first = false;
+                }
+                stm << "],";
+            }
+        }
+        stm << "\"bitrate\":" << pc.bitrate << ","
+            << "\"bitrate204\":" << ToBitrate204(pc.bitrate) << ","
+            << "\"packets\":" << pc.ts_pkt_cnt << ","
+            << "\"clear\":" << (pc.ts_pkt_cnt - pc.ts_sc_cnt - pc.inv_ts_sc_cnt) << ","
+            << "\"scrambled\":" << pc.ts_sc_cnt << ","
+            << "\"invalidscrambling\":" << pc.inv_ts_sc_cnt << ","
+            << "\"af\":" << pc.ts_af_cnt << ","
+            << "\"pcr\":" << pc.pcr_cnt << ","
+            << "\"discontinuities\":" << pc.unexp_discont << ","
+            << "\"duplicated\":" << pc.duplicated << ",";
+        if (pc.carry_pes) {
+            stm << "\"pes\":" << pc.pl_start_cnt << ","
+                << "\"invalidpesprefix\":" << pc.inv_pes_start << ",";
+        }
+        else {
+            stm << "\"unitstart\":" << pc.unit_start_cnt << ",";
+        }
+        stm << "\"description\": \"" << pc.fullDescription(true) << "\""
+            << "}" << std::endl;
+    }
+    stm << "]," << std::endl;
+
+
+    stm << "\"table\": [";
+    bool first_table = true;
+    for (PIDContextMap::const_iterator pci = _pids.begin(); pci != _pids.end(); ++pci) {
+        const PIDContext& pc(*pci->second);
+        for (ETIDContextMap::const_iterator it = pc.sections.begin(); it != pc.sections.end(); ++it) {
+            const ETIDContext& etc(*it->second);
+            stm << ((first_table) ? "" : ", ");
+            first_table = false;
+            stm << "{"
+                << "\"pid\":" << pc.pid << ","
+                << "\"tid\":" << int(etc.etid.tid()) << ",";
+            if (etc.etid.isLongSection()) {
+                stm << "\"tidext\":" << etc.etid.tidExt() << ",";
+            }
+            stm << "\"tables\":" << etc.table_count << ","
+                << "\"sections\":" << etc.section_count << ","
+                << "\"repetitionpkt\":" << etc.repetition_ts << ","
+                << "\"minrepetitionpkt\":" << etc.min_repetition_ts << ","
+                << "\"maxrepetitionpkt\":" << etc.max_repetition_ts;
+            if (_ts_bitrate != 0) {
+            	stm << ",";
+                stm << "\"repetitionms\":" << PacketInterval(_ts_bitrate, etc.repetition_ts) << ","
+                    << "\"minrepetitionms\":" << PacketInterval(_ts_bitrate, etc.min_repetition_ts) << ","
+                    << "\"maxrepetitionms\":" << PacketInterval(_ts_bitrate, etc.max_repetition_ts);
+            }
+            if (etc.versions.any()) {
+            	stm << ",";
+            	stm << "\"firstversion\":" << int(etc.first_version) << ","
+                    << "\"lastversion\":" << int(etc.last_version) << ","
+                    << "\"versions\": [";
+                first = true;
+                for (size_t i = 0; i < etc.versions.size(); ++i) {
+                    if (etc.versions.test(i)) {
+                        stm << (first ? "" : ",") << i;
+                        first = false;
+                    }
+                }
+                stm << "]";
+            }
+            stm << "}";
+            stm << std::endl;
+        }
+    }
+    stm << "]}" << std::endl;
 }
