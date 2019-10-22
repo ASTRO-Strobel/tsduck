@@ -1124,7 +1124,7 @@ void ts::TSAnalyzerReport::reportJson(std::ostream& stm, const UString& title)
         << "\"pcrbitrate204\":" << _ts_pcr_bitrate_204 << ","
         << "\"duration\":" << (_duration / 1000);
     if (!_country_code.empty()) {
-        stm << "," << "\"country\":" << _country_code;
+        stm << "," << "\"country\":\"" << _country_code << "\"";
     }
     stm << "}," << std::endl;
 
