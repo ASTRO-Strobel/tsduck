@@ -1103,6 +1103,13 @@ void ts::TSAnalyzerReport::reportJson(std::ostream& stm, const UString& title)
     if (_ts_id_valid) {
         stm << "\"id\":" << _ts_id << ",";
     }
+    int cc_errors = 0;
+    for (PIDContextMap::const_iterator it = _pids.begin(); it != _pids.end(); ++it) {
+        const PIDContext& pc(*it->second);
+        cc_errors += pc.unexp_discont;
+        cc_errors += pc.duplicated;
+    }
+    stm << "\"cc_errors\":" << cc_errors << ",";
     stm << "\"services\":" << _services.size() << ","
         << "\"clearservices\":" << (_services.size() - _scrambled_services_cnt) << ","
         << "\"scrambledservices\":" << _scrambled_services_cnt << ","
