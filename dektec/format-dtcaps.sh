@@ -28,62 +28,37 @@
 #
 #-----------------------------------------------------------------------------
 #
-#  This script retrieves the URL of the latest LinuSDK from Dektec.
+#  Format DtCaps strings from DTAPI.h.
 #
 #-----------------------------------------------------------------------------
 
-URL_BASE=https://www.dektec.com
-HTML_URL=$URL_BASE/downloads/SDK/
-GENERIC_URL=$URL_BASE/products/SDK/DTAPI/Downloads/LatestLinuxSDK
-
+# Characteristics of this script.
 SCRIPT=$(basename $BASH_SOURCE)
+ROOTDIR=$(cd $(dirname $BASH_SOURCE); pwd)
 error() { echo >&2 "$SCRIPT: $*"; exit 1; }
 
-# Merge an URL with its base.
-merge_url()
-{
-    local ref="$1"
-    local url
-    read url
+# Locate DTAPI.h.
+DTAPI=$("$ROOTDIR/dtapi-config.sh" --header)
+[[ -n "$DTAPI" ]] || error "DTAPI.h not found"
 
-    if [[ -n "$url" ]]; then
-        if [[ $url == *:* ]]; then
-            echo "$url"
-        elif [[ $url == /* ]]; then
-            echo "$URL_BASE$url"
-        elif [[ $ref == */ ]]; then
-            echo "$ref$url"
-        else
-            ref=$(dirname "$ref")
-            echo "$ref/$url"
-        fi
-    fi
-}
-
-# Retrieve the URL using the redirection from a fixed generic URL.
-# This should be the preferred method but Dektec may forget to update
-# the redirection in the generic URL.
-from_generic_url()
-{
-    curl --silent --show-error --dump-header /dev/stdout "$GENERIC_URL" | \
-        grep -i 'Location:' | \
-        sed -e 's/.*: *//' -e 's/\r//g' | \
-        merge_url "$GENERIC_URL"
-}
-
-# Retrieve the URL by parsing the HTML from the Dektec download web page.
-from_html_page()
-{
-    curl --silent --show-error --location "$HTML_URL" | \
-        grep 'href=".*LinuxSDK' | \
-        sed -e 's/.*href="//' -e 's/".*//' | \
-        merge_url "$HTML_URL"
-}
-
-# Try the HTML parsing first, then redirection.
-URL=$(from_html_page)
-[[ -z "$URL" ]] && URL=$(from_generic_url)
-[[ -z "$URL" ]] && error "cannot locate LinuxSDK location from Dektec"
-
-echo "$URL"
+# Generate the output file.
+grep '#define *DTAPI_CAP_.* Dtapi::DtCaps([0-9][0-9]*) *//' "$DTAPI" |
+    sed -e 's|.*Dtapi::DtCaps(||' -e 's|) *// *|:|' -e 's| *\r*$||' -e "s|\"|'|g" |
+    (
+        declare -i exp=0
+        declare -i num=-1
+        echo "// Auto-generated file"
+        echo "namespace {"
+        echo "    const ts::UChar* const DtCapsNames[] = {"
+        while read line; do
+            exp=$num+1
+            num=${line/:*/}
+            str=${line/*:/}
+            [[ $num == $exp ]] || error "DtCaps value out of sequence $num, expected $exp"
+            echo "        /* $num */ u\"$str\","
+        done
+        echo "    };"
+        echo "    const size_t DtCapsNamesCount = sizeof(DtCapsNames) / sizeof(DtCapsNames[0]);"
+        echo "}"
+    )
 exit 0

@@ -26,10 +26,6 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 //
 //----------------------------------------------------------------------------
-//
-//  Representation of an S2_satellite_delivery_system_descriptor.
-//
-//----------------------------------------------------------------------------
 
 #include "tsS2SatelliteDeliverySystemDescriptor.h"
 #include "tsDescriptor.h"
@@ -41,7 +37,6 @@ TSDUCK_SOURCE;
 
 #define MY_XML_NAME u"S2_satellite_delivery_system_descriptor"
 #define MY_DID ts::DID_S2_SAT_DELIVERY
-#define MY_STD ts::STD_DVB
 
 TS_XML_DESCRIPTOR_FACTORY(ts::S2SatelliteDeliverySystemDescriptor, MY_XML_NAME);
 TS_ID_DESCRIPTOR_FACTORY(ts::S2SatelliteDeliverySystemDescriptor, ts::EDID::Standard(MY_DID));
@@ -53,7 +48,7 @@ TS_FACTORY_REGISTER(ts::S2SatelliteDeliverySystemDescriptor::DisplayDescriptor, 
 //----------------------------------------------------------------------------
 
 ts::S2SatelliteDeliverySystemDescriptor::S2SatelliteDeliverySystemDescriptor() :
-    AbstractDescriptor(MY_DID, MY_XML_NAME, MY_STD, 0),
+    AbstractDeliverySystemDescriptor(MY_DID, DS_DVB_S2, MY_XML_NAME),
     scrambling_sequence_selector(false),
     multiple_input_stream_flag(false),
     backwards_compatibility_indicator(false),
@@ -76,9 +71,7 @@ ts::S2SatelliteDeliverySystemDescriptor::S2SatelliteDeliverySystemDescriptor(Duc
 
 void ts::S2SatelliteDeliverySystemDescriptor::serialize(DuckContext& duck, Descriptor& desc) const
 {
-    ByteBlockPtr bbp (new ByteBlock (2));
-    CheckNonNull (bbp.pointer());
-
+    ByteBlockPtr bbp(serializeStart());
     bbp->appendUInt8((scrambling_sequence_selector ? 0x80 : 0x00) |
                      (multiple_input_stream_flag ? 0x40 : 0x00) |
                      (backwards_compatibility_indicator ? 0x20 : 0x00) |
@@ -89,11 +82,7 @@ void ts::S2SatelliteDeliverySystemDescriptor::serialize(DuckContext& duck, Descr
     if (multiple_input_stream_flag) {
         bbp->appendUInt8(input_stream_identifier);
     }
-
-    (*bbp)[0] = _tag;
-    (*bbp)[1] = uint8_t(bbp->size() - 2);
-    Descriptor d(bbp, SHARE);
-    desc = d;
+    serializeEnd(desc, bbp);
 }
 
 

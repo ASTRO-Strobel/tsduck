@@ -69,6 +69,14 @@ namespace ts {
     TSDUCKDLL UString GetTuningSpaceUniqueName(::ITuningSpace* tuning, Report& report);
 
     //!
+    //! Get the class name of a DirectShow tuning space (Windows-specific).
+    //! @param [in] tuning Tuning space.
+    //! @param [in,out] report Where to report errors.
+    //! @return Tuning space class name or an empty string on error.
+    //!
+    TSDUCKDLL UString GetTuningSpaceClass(::ITuningSpace* tuning, Report& report);
+
+    //!
     //! Get full description of a DirectShow tuning space (Windows-specific).
     //! @param [in] tuning Tuning space.
     //! @param [in,out] report Where to report errors.
@@ -83,15 +91,6 @@ namespace ts {
     //! @return Network type or an empty string on error.
     //!
     TSDUCKDLL UString GetTuningSpaceNetworkType(::ITuningSpace* tuning, Report& report);
-
-    //!
-    //! Get a DirectShow tuning space from a network type (Windows-specific).
-    //! @param [in] networkType GUID of network type.
-    //! @param [out] tuningSpace Corresponding tuning space.
-    //! @param [in,out] report Where to report errors.
-    //! @return True on success, false on error.
-    //!
-    TSDUCKDLL bool GetTuningSpaceFromNetworkType(const ::GUID& networkType, ComPtr<::ITuningSpace>& tuningSpace, Report& report);
 
     //!
     //! Get the name for a DirectShow pin direction value (Windows-specific).

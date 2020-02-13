@@ -16,6 +16,7 @@ SOURCES += \
     ../../../src/utest/utest.cpp \
     ../../../src/utest/utestAlgorithm.cpp \
     ../../../src/utest/utestArgs.cpp \
+    ../../../src/utest/utestBCD.cpp \
     ../../../src/utest/utestBitStream.cpp \
     ../../../src/utest/utestByteBlock.cpp \
     ../../../src/utest/utestChannels.cpp \
@@ -60,6 +61,7 @@ SOURCES += \
     ../../../src/utest/utestThread.cpp \
     ../../../src/utest/utestThreadAttributes.cpp \
     ../../../src/utest/utestTime.cpp \
+    ../../../src/utest/utestTimeShiftBuffer.cpp \
     ../../../src/utest/utestTSPacket.cpp \
     ../../../src/utest/utestUString.cpp \
     ../../../src/utest/utestVariable.cpp \

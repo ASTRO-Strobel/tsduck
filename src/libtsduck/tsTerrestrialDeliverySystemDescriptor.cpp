@@ -74,19 +74,7 @@ ts::TerrestrialDeliverySystemDescriptor::TerrestrialDeliverySystemDescriptor() :
 //----------------------------------------------------------------------------
 
 ts::TerrestrialDeliverySystemDescriptor::TerrestrialDeliverySystemDescriptor(DuckContext& duck, const Descriptor& desc) :
-    AbstractDeliverySystemDescriptor(MY_DID, DS_DVB_T, MY_XML_NAME),
-    centre_frequency(0),
-    bandwidth(0),
-    high_priority(true),
-    no_time_slicing(true),
-    no_mpe_fec(true),
-    constellation(0),
-    hierarchy(0),
-    code_rate_hp(0),
-    code_rate_lp(0),
-    guard_interval(0),
-    transmission_mode(0),
-    other_frequency(false)
+    TerrestrialDeliverySystemDescriptor()
 {
     deserialize(duck, desc);
 }
@@ -98,26 +86,22 @@ ts::TerrestrialDeliverySystemDescriptor::TerrestrialDeliverySystemDescriptor(Duc
 
 void ts::TerrestrialDeliverySystemDescriptor::serialize(DuckContext& duck, Descriptor& desc) const
 {
-    uint8_t data[13];
-    data[0] = _tag;
-    data[1] = 11;
-    PutUInt32(data + 2, centre_frequency);
-    data[6] = uint8_t(bandwidth << 5) |
-              uint8_t(uint8_t(high_priority) << 4) |
-              uint8_t(uint8_t(no_time_slicing) << 3) |
-              uint8_t(uint8_t(no_mpe_fec) << 2) |
-              0x03;
-    data[7] = uint8_t(constellation << 6) |
-              uint8_t((hierarchy & 0x07) << 3) |
-              (code_rate_hp & 0x07);
-    data[8] = uint8_t(code_rate_lp << 5) |
-              uint8_t((guard_interval & 0x03) << 3) |
-              uint8_t((transmission_mode & 0x03) << 1) |
-              uint8_t(other_frequency);
-    data[9] = data[10] = data[11] = data[12] = 0xFF;
-
-    Descriptor d(data, sizeof(data));
-    desc = d;
+    ByteBlockPtr bbp(serializeStart());
+    bbp->appendUInt32(uint32_t(centre_frequency / 10)); // coded in 10 Hz unit
+    bbp->appendUInt8(uint8_t(bandwidth << 5) |
+                     uint8_t(uint8_t(high_priority) << 4) |
+                     uint8_t(uint8_t(no_time_slicing) << 3) |
+                     uint8_t(uint8_t(no_mpe_fec) << 2) |
+                     0x03);
+    bbp->appendUInt8(uint8_t(constellation << 6) |
+                     uint8_t((hierarchy & 0x07) << 3) |
+                     (code_rate_hp & 0x07));
+    bbp->appendUInt8(uint8_t(code_rate_lp << 5) |
+                     uint8_t((guard_interval & 0x03) << 3) |
+                     uint8_t((transmission_mode & 0x03) << 1) |
+                     uint8_t(other_frequency));
+    bbp->appendUInt32(0xFFFFFFFF);
+    serializeEnd(desc, bbp);
 }
 
 
@@ -131,7 +115,7 @@ void ts::TerrestrialDeliverySystemDescriptor::deserialize(DuckContext& duck, con
 
     if (_is_valid) {
         const uint8_t* data = desc.payload();
-        centre_frequency = GetUInt32(data);
+        centre_frequency = uint64_t(GetUInt32(data)) * 10; // coded in 10 Hz unit
         bandwidth = (data[4] >> 5) & 0x07;
         high_priority = (data[4] & 0x10) != 0;
         no_time_slicing = (data[4] & 0x08) != 0;
@@ -291,7 +275,7 @@ namespace {
 
 void ts::TerrestrialDeliverySystemDescriptor::buildXML(DuckContext& duck, xml::Element* root) const
 {
-    root->setIntAttribute(u"centre_frequency", 10 * uint64_t(centre_frequency), false);
+    root->setIntAttribute(u"centre_frequency", centre_frequency, false);
     root->setIntEnumAttribute(BandwidthNames, u"bandwidth", bandwidth);
     root->setIntEnumAttribute(PriorityNames, u"priority", int(high_priority));
     root->setBoolAttribute(u"no_time_slicing", no_time_slicing);
@@ -312,10 +296,9 @@ void ts::TerrestrialDeliverySystemDescriptor::buildXML(DuckContext& duck, xml::E
 
 void ts::TerrestrialDeliverySystemDescriptor::fromXML(DuckContext& duck, const xml::Element* element)
 {
-    uint64_t frequency = 0;
     _is_valid =
         checkXMLName(element) &&
-        element->getIntAttribute<uint64_t>(frequency, u"centre_frequency", true) &&
+        element->getIntAttribute<uint64_t>(centre_frequency, u"centre_frequency", true) &&
         element->getIntEnumAttribute(bandwidth, BandwidthNames, u"bandwidth", true) &&
         element->getIntEnumAttribute(high_priority, PriorityNames, u"priority", true) &&
         element->getBoolAttribute(no_time_slicing, u"no_time_slicing", true) &&
@@ -327,7 +310,4 @@ void ts::TerrestrialDeliverySystemDescriptor::fromXML(DuckContext& duck, const x
         element->getIntEnumAttribute(guard_interval, GuardIntervalNames, u"guard_interval", true) &&
         element->getIntEnumAttribute(transmission_mode, TransmissionModeNames, u"transmission_mode", true) &&
         element->getBoolAttribute(other_frequency, u"other_frequency", true);
-    if (_is_valid) {
-        centre_frequency = uint32_t(frequency / 10);
-    }
 }

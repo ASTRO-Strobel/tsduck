@@ -50,8 +50,49 @@ const char* const ts::UString::UTF8_BOM = "\xEF\xBB\xBF";
 // Default separator string for groups of thousands, a comma.
 const ts::UString ts::UString::DEFAULT_THOUSANDS_SEPARATOR(1, u',');
 
-//! A reference empty string.
+// A reference empty string.
 const ts::UString ts::UString::EMPTY;
+
+// The default list of characters to be protected by quoted().
+const ts::UString ts::UString::DEFAULT_SPECIAL_CHARACTERS(u"\"'`;$*?&(){}[]");
+const ts::UString ts::UString::DEFAULT_QUOTE_CHARACTERS(u"\"'");
+
+
+//----------------------------------------------------------------------------
+// Conversions with Windows Unicode strings (Windows-specific).
+//----------------------------------------------------------------------------
+
+#if defined(TS_WINDOWS) || defined(DOXYGEN)
+
+// Constructor using a Windows Unicode string.
+ts::UString::UString(const ::WCHAR* s, size_type count, const allocator_type& alloc) :
+    UString(reinterpret_cast<const UChar*>(s), count, alloc)
+{
+    assert(sizeof(::WCHAR) == sizeof(UChar));
+}
+
+// Constructor using a Windows Unicode string.
+ts::UString::UString(const ::WCHAR* s, const allocator_type& alloc) :
+    UString(s == 0 ? &CHAR_NULL : reinterpret_cast<const UChar*>(s), alloc)
+{
+    assert(sizeof(::WCHAR) == sizeof(UChar));
+}
+
+// Get the address of the underlying null-terminated Unicode string.
+const ::WCHAR* ts::UString::wc_str() const
+{
+    assert(sizeof(::WCHAR) == sizeof(UChar));
+    return reinterpret_cast<const ::WCHAR*>(data());
+}
+
+// Get the address of the underlying null-terminated Unicode string.
+::WCHAR* ts::UString::wc_str()
+{
+    assert(sizeof(::WCHAR) == sizeof(UChar));
+    return reinterpret_cast<::WCHAR*>(const_cast<UChar*>(data()));
+}
+
+#endif
 
 
 //----------------------------------------------------------------------------
@@ -712,6 +753,36 @@ ts::UString ts::UString::toSubstituted(UChar value, UChar replacement) const
 
 
 //----------------------------------------------------------------------------
+// Indent all lines in the string.
+//----------------------------------------------------------------------------
+
+void ts::UString::indent(size_t count)
+{
+    if (count > 0) {
+        bool atbol = true; // at beginning of a line
+        for (size_type i = 0; i < size(); ++i) {
+            const UChar c = at(i);
+            if (c == LINE_FEED) {
+                atbol = true;
+            }
+            else if (atbol && !IsSpace(c)) {
+                atbol = false;
+                insert(i, count, SPACE);
+                i += count;
+            }
+        }
+    }
+}
+
+ts::UString ts::UString::toIndented(size_t count) const
+{
+    UString result(*this);
+    result.indent(count);
+    return result;
+}
+
+
+//----------------------------------------------------------------------------
 // Prefix / suffix checking.
 //----------------------------------------------------------------------------
 
@@ -800,6 +871,11 @@ bool ts::UString::endWith(const UString& suffix, CaseSensitivity cs) const
             return false;
         }
     }
+}
+
+bool ts::UString::contain(UChar c) const
+{
+    return find(c) != NPOS;
 }
 
 bool ts::UString::contain(const UString& substring, CaseSensitivity cs) const
@@ -977,6 +1053,66 @@ ts::UString ts::UString::toJustified(const UString& right, size_type wid, UChar 
     UString result(*this);
     result.justify(right, wid, pad, spacesAroundPad);
     return result;
+}
+
+
+//----------------------------------------------------------------------------
+// Replace the string with a "quoted" version of it.
+//----------------------------------------------------------------------------
+
+ts::UString ts::UString::toQuoted(UChar quoteCharacter, const UString& specialCharacters, bool forceQuote) const
+{
+    UString result(*this);
+    result.quoted(quoteCharacter, specialCharacters, forceQuote);
+    return result;
+}
+
+void ts::UString::quoted(UChar quoteCharacter, const UString& specialCharacters, bool forceQuote)
+{
+    // Check if the string contains any character which requires quoting.
+    // An empty string needs to be quoted as well to be identified as an actual empty string.
+    bool needQuote = forceQuote || empty();
+    for (size_type i = 0; !needQuote && i < size(); ++i) {
+        const UChar c = at(i);
+        needQuote = c == '\\' || c == quoteCharacter || IsSpace(c) || specialCharacters.contain(c);
+    }
+
+    // Perform quoting only if needed.
+    if (needQuote) {
+        // Opening quote.
+        insert(0, 1, quoteCharacter);
+        // Loop on all characters. Skip new opening quote.
+        for (size_type i = 1; i < size(); ++i) {
+            const UChar c = at(i);
+            if (c == '\\' || c == quoteCharacter) {
+                // This character must be escaped.
+                insert(i++, 1, '\\');
+            }
+            else if (IsSpace(c)) {
+                // A space character is either a plain space or a specific escape sequence.
+                UChar rep = CHAR_NULL;
+                switch (c) {
+                    case BACKSPACE: rep = u'b'; break;
+                    case FORM_FEED: rep = u'f'; break;
+                    case LINE_FEED: rep = u'n'; break;
+                    case CARRIAGE_RETURN: rep = u'r'; break;
+                    case HORIZONTAL_TABULATION: rep = u't'; break;
+                    default: break;
+                }
+                if (rep == CHAR_NULL) {
+                    // No escape sequence defined, make sure it is just a space.
+                    at(i) = SPACE;
+                }
+                else {
+                    // An escape sequence is defined.
+                    insert(i++, 1, '\\');
+                    at(i) = rep;
+                }
+            }
+        }
+        // Final quote.
+        push_back(quoteCharacter);
+    }
 }
 
 

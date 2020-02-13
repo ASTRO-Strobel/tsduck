@@ -53,15 +53,13 @@ constexpr size_t ts::Tuner::DEFAULT_SINK_QUEUE_SIZE;
 
 class ts::Tuner::Guts
 {
-    TS_NOBUILD_NOCOPY(Guts);
-private:
-    Tuner*     _parent;             // Parent tuner.
+    TS_NOCOPY(Guts);
 public:
-    size_t     sink_queue_size;     // Media sample queue size
-    TunerGraph graph;               // The filter graph
+    size_t     sink_queue_size;   // Media sample queue size
+    TunerGraph graph;             // The filter graph
 
     // Constructor and destructor.
-    Guts(Tuner* tuner);
+    Guts();
     ~Guts();
 
     // Get signal strength in mdB.
@@ -81,8 +79,7 @@ public:
 // System guts constructor and destructor.
 //-----------------------------------------------------------------------------
 
-ts::Tuner::Guts::Guts(Tuner* tuner) :
-    _parent(tuner),
+ts::Tuner::Guts::Guts() :
     sink_queue_size(DEFAULT_SINK_QUEUE_SIZE),
     graph()
 {
@@ -99,7 +96,7 @@ ts::Tuner::Guts::~Guts()
 
 void ts::Tuner::allocateGuts()
 {
-    _guts = new Guts(this);
+    _guts = new Guts();
 }
 
 void ts::Tuner::deleteGuts()
@@ -109,12 +106,17 @@ void ts::Tuner::deleteGuts()
 
 
 //-----------------------------------------------------------------------------
-// Set the max number of queued media samples (Windows-specific).
+// Set the Windows-specific parameters.
 //-----------------------------------------------------------------------------
 
 void ts::Tuner::setSinkQueueSize(size_t s)
 {
     _guts->sink_queue_size = s;
+}
+
+void ts::Tuner::setReceiverFilterName(const UString& name)
+{
+    _guts->graph.setReceiverName(name);
 }
 
 
@@ -265,7 +267,8 @@ bool ts::Tuner::getCurrentTuning(ModulationArgs& params, bool reset_unknown, Rep
     bool found = false;
     switch (ttype) {
 
-        case TT_DVB_S: {
+        case TT_DVB_S:
+        case TT_ISDB_S: {
             // Note: it is useless to get the frequency of a DVB-S tuner since it
             // returns the intermediate frequency and there is no unique satellite
             // frequency for a given intermediate frequency.
@@ -315,7 +318,8 @@ bool ts::Tuner::getCurrentTuning(ModulationArgs& params, bool reset_unknown, Rep
             break;
         }
 
-        case TT_DVB_C: {
+        case TT_DVB_C:
+        case TT_ISDB_C: {
             if (reset_unknown) {
                 params.frequency.reset();
             }
@@ -342,7 +346,8 @@ bool ts::Tuner::getCurrentTuning(ModulationArgs& params, bool reset_unknown, Rep
             break;
         }
 
-        case TT_DVB_T: {
+        case TT_DVB_T:
+        case TT_ISDB_T: {
             if (reset_unknown) {
                 params.frequency.reset();
             }
@@ -421,20 +426,7 @@ bool ts::Tuner::getCurrentTuning(ModulationArgs& params, bool reset_unknown, Rep
 
 bool ts::Tuner::tune(ModulationArgs& params, Report& report)
 {
-    // Initial parameter checks.
-    if (!checkTuneParameters(params, report)) {
-        return false;
-    }
-
-    // Create a DirectShow tune request
-    ComPtr<::ITuneRequest> tune_request;
-    if (!CreateTuneRequest(_duck, tune_request, _guts->graph.tuningSpace(), params, report)) {
-        return false;
-    }
-    assert(!tune_request.isNull());
-
-    // Tune to transponder
-    return _guts->graph.putTuneRequest(tune_request.pointer(), report);
+    return checkTuneParameters(params, report) && _guts->graph.sendTuneRequest(_duck, params, report);
 }
 
 
@@ -598,25 +590,24 @@ bool ts::Tuner::Guts::FindTuners(DuckContext& duck, Tuner* tuner, TunerPtrVector
     }
 
     // Loop on all enumerated tuners.
-    for (size_t dvb_device_current = 0; dvb_device_current < tuner_monikers.size(); ++dvb_device_current) {
+    // We need to keep two separate indexes. 'moniker_index' is a true index in 'tuner_monikers'.
+    // But this is not the same thing as option --adapter because not all filters from 'tuner_monikers'
+    // are valid tuners. Some of them can be skipped. So, we keep a counter named 'dvb_device_current'
+    // which counts actually useable tuners. This index is synchronous with --adapter.
+    int dvb_device_current = 0;
+    for (size_t moniker_index = 0; moniker_index < tuner_monikers.size(); ++moniker_index) {
 
         // Get friendly name of this tuner filter
-        const UString tuner_name(GetStringPropertyBag(tuner_monikers[dvb_device_current].pointer(), L"FriendlyName", debug_report));
+        const UString tuner_name(GetStringPropertyBag(tuner_monikers[moniker_index].pointer(), L"FriendlyName", debug_report));
         report.debug(u"found tuner filter \"%s\"", {tuner_name});
 
         // If a device name was specified, filter this name.
-        if (tuner != nullptr && !tuner->_device_name.empty()) {
-            if (dvb_device_index >= 0 && int(dvb_device_current) != dvb_device_index) {
-                // Device specified by index, but not this one, try next tuner
-                continue;
-            }
-            else if (dvb_device_index < 0 && !tuner_name.similar(tuner->_device_name)) {
-                // Device specified by name, but not this one, try next tuner
-                // Since the filter names are long and complicated, ignore case and blanks, use UString::similar().
-                continue;
-            }
-            // Device found, update device name
-            tuner->_device_name = tuner_name;
+        // First case: a tuner filter name was specified. In that case, there is
+        // no need to test other filters, simply skip them. Since the filter names
+        // are long and complicated, ignore case and blanks, use UString::similar().
+        if (tuner != nullptr && !tuner->_device_name.empty() && dvb_device_index < 0 && !tuner_name.similar(tuner->_device_name)) {
+            // Device specified by name, but not this one, try next tuner
+            continue;
         }
 
         // If we search one specific tuner (tuner != nullptr), use this one.
@@ -625,23 +616,36 @@ bool ts::Tuner::Guts::FindTuners(DuckContext& duck, Tuner* tuner, TunerPtrVector
         Tuner& tref(tuner == nullptr ? *tptr : *tuner);
 
         // Try to build a graph from this network provider and tuner
-        if (tref._guts->graph.initialize(tuner_monikers[dvb_device_current].pointer(), tref._delivery_systems, report)) {
+        if (tref._guts->graph.initialize(tuner_name, tuner_monikers[moniker_index].pointer(), tref._delivery_systems, report)) {
 
-            // Graph correctly built, we can use this tuner.
-            tref._is_open = true;
-            tref._info_only = true;
-            tref._device_name = tuner_name;
-            tref._device_info.clear();  // none on Windows
-
-            // Add tuner it to response set
-            if (tuner_list != nullptr) {
-                // Add the tuner to the vector
-                tuner_list->push_back(tptr);
+            // Graph correctly built, this is a valid tuner.
+            // Check if a device was specified by adapter index.
+            if (dvb_device_index >= 0 && dvb_device_current != dvb_device_index) {
+                // Adapter index was specified, but not this one.
+                tref._guts->graph.clear(debug_report);
+                tref._delivery_systems.clear();
             }
             else {
-                // One single tuner requested, one found, return
-                return true;
+                // Either no adapter index was specified or this is the right one.
+                // Use that tuner.
+                tref._is_open = true;
+                tref._info_only = true;
+                tref._device_name = tuner_name;
+                tref._device_info.clear();  // none on Windows
+
+                // Add tuner it to response set
+                if (tuner_list != nullptr) {
+                    // Build a list of all tuners, add this one to the vector
+                    tuner_list->push_back(tptr);
+                }
+                else {
+                    // One single tuner requested, one found, return
+                    return true;
+                }
             }
+
+            // Count valid devices.
+            dvb_device_current++;
         }
     }
     return true;

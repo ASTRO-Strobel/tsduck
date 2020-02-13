@@ -26,66 +26,25 @@
 // THE POSSIBILITY OF SUCH DAMAGE.
 //
 //----------------------------------------------------------------------------
-//
-//  Utility routines for memory operations.
-//
-//----------------------------------------------------------------------------
 
-#include "tsMemoryUtils.h"
-TSDUCK_SOURCE;
+#pragma once
 
 
 //----------------------------------------------------------------------------
-// Check if a memory area starts with the specified prefix
+// Deserialize an integer.
 //----------------------------------------------------------------------------
 
-bool ts::StartsWith (const void* area, size_t area_size, const void* prefix, size_t prefix_size)
+template<typename INT, typename std::enable_if<std::is_integral<INT>::value>::type*>
+bool ts::AbstractSignalization::deserializeInt(INT& value, const uint8_t*& data, size_t& size)
 {
-    if (prefix_size == 0 || area_size < prefix_size) {
+    if (size < sizeof(INT) || data == nullptr) {
+        _is_valid = false;
         return false;
     }
     else {
-        return ::memcmp (area, prefix, prefix_size) == 0;
-    }
-}
-
-
-//----------------------------------------------------------------------------
-// Locate a pattern into a memory area. Return 0 if not found
-//----------------------------------------------------------------------------
-
-const void* ts::LocatePattern (const void* area, size_t area_size, const void* pattern, size_t pattern_size)
-{
-    if (pattern_size > 0) {
-        const uint8_t* a = reinterpret_cast <const uint8_t*> (area);
-        const uint8_t* p = reinterpret_cast <const uint8_t*> (pattern);
-        while (area_size >= pattern_size) {
-            if (*a == *p && ::memcmp (a, p, pattern_size) == 0) {
-                return a;
-            }
-            ++a;
-            --area_size;
-        }
-    }
-    return nullptr; // not found
-}
-
-//----------------------------------------------------------------------------
-// Check if a memory area contains all identical byte values.
-//----------------------------------------------------------------------------
-
-bool ts::IdenticalBytes(const void * area, size_t area_size)
-{
-    if (area_size < 2) {
-        return false;
-    }
-    else {
-        const uint8_t* d = reinterpret_cast<const uint8_t*>(area);
-        for (size_t i = 0; i < area_size - 1; ++i) {
-            if (d[i] != d[i + 1]) {
-                return false;
-            }
-        }
+        GetInt(data, value);
+        data += sizeof(INT);
+        size -= sizeof(INT);
         return true;
     }
 }

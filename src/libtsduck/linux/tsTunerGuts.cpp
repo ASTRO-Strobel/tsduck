@@ -38,7 +38,7 @@
 #include "tsSysUtils.h"
 #include "tsSignalAllocator.h"
 #include "tsNullReport.h"
-#include "tsMemoryUtils.h"
+#include "tsMemory.h"
 #include "tsDTVProperties.h"
 TSDUCK_SOURCE;
 
@@ -46,7 +46,7 @@ TSDUCK_SOURCE;
 // "uncorrected blocks". But the corresponding ioctl commands (FE_READ_BER, FE_READ_SNR,
 // FE_READ_SIGNAL_STRENGTH, FE_READ_UNCORRECTED_BLOCKS) are marked as deprecated with
 // DVB API v5 and most drivers now return error 524 (ENOTSUPP). So, we simply drop the
-// feature. Also note that there are several forms os "unsupported" in errno and 524
+// feature. Also note that there are several forms of "unsupported" in errno and 524
 // is usually not defined...
 #if !defined(DVB_ENOTSUPP)
     #define DVB_ENOTSUPP 524
@@ -206,15 +206,15 @@ void ts::Tuner::setDemuxBufferSize(size_t s)
 namespace {
     inline int ioctl_fe_set_tone(int fd, fe_sec_tone_mode_t tone)
     {
-        return ::ioctl(fd, FE_SET_TONE, tone);
+        return ::ioctl(fd, ts::ioctl_request_t(FE_SET_TONE), tone);
     }
     inline int ioctl_fe_set_voltage(int fd, fe_sec_voltage_t voltage)
     {
-        return ::ioctl(fd, FE_SET_VOLTAGE, voltage);
+        return ::ioctl(fd, ts::ioctl_request_t(FE_SET_VOLTAGE), voltage);
     }
     inline int ioctl_fe_diseqc_send_burst(int fd, fe_sec_mini_cmd_t burst)
     {
-        return ::ioctl(fd, FE_DISEQC_SEND_BURST, burst);
+        return ::ioctl(fd, ts::ioctl_request_t(FE_DISEQC_SEND_BURST), burst);
     }
 }
 
@@ -311,23 +311,57 @@ bool ts::Tuner::open(const UString& device_name, bool info_only, Report& report)
 
     // Get characteristics of the frontend
 
-    if (::ioctl(_guts->frontend_fd, FE_GET_INFO, &_guts->fe_info) < 0) {
+    if (::ioctl(_guts->frontend_fd, ioctl_request_t(FE_GET_INFO), &_guts->fe_info) < 0) {
         report.error(u"error getting info on %s: %s", {_guts->frontend_name, ErrorCodeMessage()});
         return close(report) || false;
     }
     _guts->fe_info.name[sizeof(_guts->fe_info.name) - 1] = 0;
     _device_info = UString::FromUTF8(_guts->fe_info.name);
 
-    // Get the set of delivery systems for this frontend.
+    // Get the set of delivery systems for this frontend. Use DTV_ENUM_DELSYS to list all delivery systems.
+    // If this failed, probably due to an obsolete driver, use the tuner type from FE_GET_INFO. This gives
+    // only one tuner type but this is better than nothing.
 
     _delivery_systems.clear();
     DTVProperties props;
     props.add(DTV_ENUM_DELSYS);
-    if (::ioctl(_guts->frontend_fd, FE_GET_PROPERTY, props.getIoctlParam()) < 0) {
-        report.error(u"error getting delivery systems of %s: %s", {_guts->frontend_name, ErrorCodeMessage()});
-        return close(report) || false;
+    if (::ioctl(_guts->frontend_fd, ioctl_request_t(FE_GET_PROPERTY), props.getIoctlParam()) >= 0) {
+        // DTV_ENUM_DELSYS succeeded, get all delivery systems.
+        props.getValuesByCommand(_delivery_systems, DTV_ENUM_DELSYS);
     }
-    props.getValuesByCommand(_delivery_systems, DTV_ENUM_DELSYS);
+    else {
+        // DTV_ENUM_DELSYS failed, convert tuner type from FE_GET_INFO.
+        const ErrorCode err = LastErrorCode();
+        const bool can2g = (_guts->fe_info.caps & FE_CAN_2G_MODULATION) != 0;
+        switch (_guts->fe_info.type) {
+            case FE_QPSK:
+                _delivery_systems.insert(DS_DVB_S);
+                if (can2g) {
+                    _delivery_systems.insert(DS_DVB_S2);
+                }
+                break;
+            case FE_QAM:
+                _delivery_systems.insert(DS_DVB_C);
+                if (can2g) {
+                    _delivery_systems.insert(DS_DVB_C2);
+                }
+                break;
+            case FE_OFDM:
+                _delivery_systems.insert(DS_DVB_T);
+                if (can2g) {
+                    _delivery_systems.insert(DS_DVB_T2);
+                }
+                break;
+            case FE_ATSC:
+                _delivery_systems.insert(DS_ATSC);
+                break;
+            default:
+                report.error(u"invalid tuner type %d for %s", {_guts->fe_info.type, _guts->frontend_name});
+                close(report);
+                return false;
+        }
+        report.verbose(u"error getting delivery systems of %s (%s), using %s", {_guts->frontend_name, ErrorCodeMessage(err), _delivery_systems.toString()});
+    }
 
     // Open DVB adapter DVR (tap for TS packets) and adapter demux
 
@@ -337,11 +371,13 @@ bool ts::Tuner::open(const UString& device_name, bool info_only, Report& report)
     else {
         if ((_guts->dvr_fd = ::open(_guts->dvr_name.toUTF8().c_str(), O_RDONLY)) < 0) {
             report.error(u"error opening %s: %s", {_guts->dvr_name, ErrorCodeMessage()});
-            return close(report) || false;
+            close(report);
+            return false;
         }
         if ((_guts->demux_fd = ::open(_guts->demux_name.toUTF8().c_str(), O_RDWR)) < 0) {
             report.error(u"error opening %s: %s", {_guts->demux_name, ErrorCodeMessage()});
-            return close(report) || false;
+            close(report);
+            return false;
         }
     }
 
@@ -356,7 +392,7 @@ bool ts::Tuner::open(const UString& device_name, bool info_only, Report& report)
 bool ts::Tuner::close(Report& report)
 {
     // Stop the demux
-    if (_guts->demux_fd >= 0 && ::ioctl(_guts->demux_fd, DMX_STOP) < 0) {
+    if (_guts->demux_fd >= 0 && ::ioctl(_guts->demux_fd, ioctl_request_t(DMX_STOP)) < 0) {
         report.error(u"error stopping demux on %s: %s", {_guts->demux_name, ErrorCodeMessage()});
     }
 
@@ -393,7 +429,7 @@ bool ts::Tuner::Guts::getFrontendStatus(::fe_status_t& status, Report& report)
 {
     status = FE_ZERO;
     errno = 0;
-    const bool ok = ::ioctl(frontend_fd, FE_READ_STATUS, &status) == 0;
+    const bool ok = ::ioctl(frontend_fd, ioctl_request_t(FE_READ_STATUS), &status) == 0;
     const ErrorCode err = LastErrorCode();
     if (ok || (!ok && err == EBUSY && status != FE_ZERO)) {
         return true;
@@ -436,7 +472,7 @@ int ts::Tuner::signalStrength(Report& report)
     }
 
     uint16_t strength = 0;
-    if (::ioctl(_guts->frontend_fd, FE_READ_SIGNAL_STRENGTH, &strength) < 0) {
+    if (::ioctl(_guts->frontend_fd, ioctl_request_t(FE_READ_SIGNAL_STRENGTH), &strength) < 0) {
         const ErrorCode err = LastErrorCode();
         // Silently ignore deprecated feature, see comment at beginning of file.
         if (err != DVB_ENOTSUPP) {
@@ -473,12 +509,14 @@ bool ts::Tuner::Guts::getCurrentTuning(ModulationArgs& params, bool reset_unknow
     // Get the current delivery system
     DTVProperties props;
     props.add(DTV_DELIVERY_SYSTEM);
-    if (::ioctl(frontend_fd, FE_GET_PROPERTY, props.getIoctlParam()) < 0) {
+    if (::ioctl(frontend_fd, ioctl_request_t(FE_GET_PROPERTY), props.getIoctlParam()) < 0) {
         const ErrorCode err = LastErrorCode();
         report.error(u"error getting current delivery system from tuner: %s", {ErrorCodeMessage(err)});
         return false;
     }
+
     const DeliverySystem delsys = DeliverySystem(props.getByCommand(DTV_DELIVERY_SYSTEM));
+    params.delivery_system = delsys;
 
     // Get specific tuning parameters
     switch (delsys) {
@@ -499,13 +537,12 @@ bool ts::Tuner::Guts::getCurrentTuning(ModulationArgs& params, bool reset_unknow
             props.add(DTV_INVERSION);
             props.add(DTV_SYMBOL_RATE);
             props.add(DTV_INNER_FEC);
-            props.add(DTV_DELIVERY_SYSTEM);
             props.add(DTV_MODULATION);
             props.add(DTV_PILOT);
             props.add(DTV_ROLLOFF);
             props.add(DTV_STREAM_ID);
 
-            if (::ioctl(frontend_fd, FE_GET_PROPERTY, props.getIoctlParam()) < 0) {
+            if (::ioctl(frontend_fd, ioctl_request_t(FE_GET_PROPERTY), props.getIoctlParam()) < 0) {
                 const ErrorCode err = LastErrorCode();
                 report.error(u"error getting tuning parameters : %s", {ErrorCodeMessage(err)});
                 return false;
@@ -514,7 +551,6 @@ bool ts::Tuner::Guts::getCurrentTuning(ModulationArgs& params, bool reset_unknow
             params.inversion = SpectralInversion(props.getByCommand(DTV_INVERSION));
             params.symbol_rate = props.getByCommand(DTV_SYMBOL_RATE);
             params.inner_fec = InnerFEC(props.getByCommand(DTV_INNER_FEC));
-            params.delivery_system = DeliverySystem(props.getByCommand(DTV_DELIVERY_SYSTEM));
             params.modulation = Modulation(props.getByCommand(DTV_MODULATION));
             params.pilots = Pilot(props.getByCommand(DTV_PILOT));
             params.roll_off = RollOff(props.getByCommand(DTV_ROLLOFF));
@@ -540,7 +576,7 @@ bool ts::Tuner::Guts::getCurrentTuning(ModulationArgs& params, bool reset_unknow
             props.add(DTV_HIERARCHY);
             props.add(DTV_STREAM_ID);
 
-            if (::ioctl(frontend_fd, FE_GET_PROPERTY, props.getIoctlParam()) < 0) {
+            if (::ioctl(frontend_fd, ioctl_request_t(FE_GET_PROPERTY), props.getIoctlParam()) < 0) {
                 const ErrorCode err = LastErrorCode();
                 report.error(u"error getting tuning parameters : %s", {ErrorCodeMessage(err)});
                 return false;
@@ -569,7 +605,7 @@ bool ts::Tuner::Guts::getCurrentTuning(ModulationArgs& params, bool reset_unknow
             props.add(DTV_INNER_FEC);
             props.add(DTV_MODULATION);
 
-            if (::ioctl(frontend_fd, FE_GET_PROPERTY, props.getIoctlParam()) < 0) {
+            if (::ioctl(frontend_fd, ioctl_request_t(FE_GET_PROPERTY), props.getIoctlParam()) < 0) {
                 const ErrorCode err = LastErrorCode();
                 report.error(u"error getting tuning parameters : %s", {ErrorCodeMessage(err)});
                 return false;
@@ -588,7 +624,7 @@ bool ts::Tuner::Guts::getCurrentTuning(ModulationArgs& params, bool reset_unknow
             props.add(DTV_INVERSION);
             props.add(DTV_MODULATION);
 
-            if (::ioctl(frontend_fd, FE_GET_PROPERTY, props.getIoctlParam()) < 0) {
+            if (::ioctl(frontend_fd, ioctl_request_t(FE_GET_PROPERTY), props.getIoctlParam()) < 0) {
                 const ErrorCode err = LastErrorCode();
                 report.error(u"error getting tuning parameters : %s", {ErrorCodeMessage(err)});
                 return false;
@@ -599,8 +635,152 @@ bool ts::Tuner::Guts::getCurrentTuning(ModulationArgs& params, bool reset_unknow
             params.modulation = Modulation(props.getByCommand(DTV_MODULATION));
             return true;
         }
-        case DS_ISDB_S:
-        case DS_ISDB_T:
+        case DS_ISDB_S: {
+            // Note: same remark about the frequency as DVB-S tuner.
+            if (reset_unknown) {
+                params.frequency = 0;
+                params.polarity = ModulationArgs::DEFAULT_POLARITY;
+                params.satellite_number = ModulationArgs::DEFAULT_SATELLITE_NUMBER;
+                params.lnb = ModulationArgs::DEFAULT_LNB;
+            }
+
+            props.clear();
+            props.add(DTV_INVERSION);
+            props.add(DTV_SYMBOL_RATE);
+            props.add(DTV_INNER_FEC);
+
+            if (::ioctl(frontend_fd, ioctl_request_t(FE_GET_PROPERTY), props.getIoctlParam()) < 0) {
+                const ErrorCode err = LastErrorCode();
+                report.error(u"error getting tuning parameters : %s", {ErrorCodeMessage(err)});
+                return false;
+            }
+
+            params.inversion = SpectralInversion(props.getByCommand(DTV_INVERSION));
+            params.symbol_rate = props.getByCommand(DTV_SYMBOL_RATE);
+            params.inner_fec = InnerFEC(props.getByCommand(DTV_INNER_FEC));
+            return true;
+        }
+        case DS_ISDB_T: {
+            props.clear();
+            props.add(DTV_FREQUENCY);
+            props.add(DTV_INVERSION);
+            props.add(DTV_BANDWIDTH_HZ);
+            props.add(DTV_TRANSMISSION_MODE);
+            props.add(DTV_GUARD_INTERVAL);
+            props.add(DTV_ISDBT_SOUND_BROADCASTING);
+            props.add(DTV_ISDBT_SB_SUBCHANNEL_ID);
+            props.add(DTV_ISDBT_SB_SEGMENT_COUNT);
+            props.add(DTV_ISDBT_SB_SEGMENT_IDX);
+            props.add(DTV_ISDBT_LAYER_ENABLED);
+            props.add(DTV_ISDBT_PARTIAL_RECEPTION);
+            props.add(DTV_ISDBT_LAYERA_FEC);
+            props.add(DTV_ISDBT_LAYERA_MODULATION);
+            props.add(DTV_ISDBT_LAYERA_SEGMENT_COUNT);
+            props.add(DTV_ISDBT_LAYERA_TIME_INTERLEAVING);
+            props.add(DTV_ISDBT_LAYERB_FEC);
+            props.add(DTV_ISDBT_LAYERB_MODULATION);
+            props.add(DTV_ISDBT_LAYERB_SEGMENT_COUNT);
+            props.add(DTV_ISDBT_LAYERB_TIME_INTERLEAVING);
+            props.add(DTV_ISDBT_LAYERC_FEC);
+            props.add(DTV_ISDBT_LAYERC_MODULATION);
+            props.add(DTV_ISDBT_LAYERC_SEGMENT_COUNT);
+            props.add(DTV_ISDBT_LAYERC_TIME_INTERLEAVING);
+
+            if (::ioctl(frontend_fd, ioctl_request_t(FE_GET_PROPERTY), props.getIoctlParam()) < 0) {
+                const ErrorCode err = LastErrorCode();
+                report.error(u"error getting tuning parameters : %s", {ErrorCodeMessage(err)});
+                return false;
+            }
+
+            uint32_t val = 0;
+            params.frequency = props.getByCommand(DTV_FREQUENCY);
+            params.inversion = SpectralInversion(props.getByCommand(DTV_INVERSION));
+            params.bandwidth = BandWidthCodeFromHz(props.getByCommand(DTV_BANDWIDTH_HZ));
+            params.transmission_mode = TransmissionMode(props.getByCommand(DTV_TRANSMISSION_MODE));
+            params.guard_interval = GuardInterval(props.getByCommand(DTV_GUARD_INTERVAL));
+            params.sound_broadcasting.reset();
+            if ((val = props.getByCommand(DTV_ISDBT_SOUND_BROADCASTING)) != DTVProperties::UNKNOWN) {
+                params.sound_broadcasting = val != 0;
+            }
+            params.sb_subchannel_id.reset();
+            if ((val = props.getByCommand(DTV_ISDBT_SB_SUBCHANNEL_ID)) != DTVProperties::UNKNOWN) {
+                params.sb_subchannel_id = int(val);
+            }
+            params.sb_segment_count.reset();
+            if ((val = props.getByCommand(DTV_ISDBT_SB_SEGMENT_COUNT)) != DTVProperties::UNKNOWN) {
+                params.sb_segment_count = int(val);
+            }
+            params.sb_segment_index.reset();
+            if ((val = props.getByCommand(DTV_ISDBT_SB_SEGMENT_IDX)) != DTVProperties::UNKNOWN) {
+                params.sb_segment_index = int(val);
+            }
+            params.isdbt_partial_reception.reset();
+            if ((val = props.getByCommand(DTV_ISDBT_PARTIAL_RECEPTION)) != DTVProperties::UNKNOWN) {
+                params.isdbt_partial_reception = val != 0;
+            }
+            params.isdbt_layers.reset();
+            if ((val = props.getByCommand(DTV_ISDBT_LAYER_ENABLED)) != DTVProperties::UNKNOWN) {
+                params.isdbt_layers = UString();
+                if ((val & 0x01) != 0) {
+                    params.isdbt_layers.value().append(1, u'A');
+                }
+                if ((val & 0x02) != 0) {
+                    params.isdbt_layers.value().append(1, u'B');
+                }
+                if ((val & 0x04) != 0) {
+                    params.isdbt_layers.value().append(1, u'C');
+                }
+            }
+            params.layer_a_fec.reset();
+            if ((val = props.getByCommand(DTV_ISDBT_LAYERA_FEC)) != DTVProperties::UNKNOWN) {
+                params.layer_a_fec = InnerFEC(val);
+            }
+            params.layer_a_modulation.reset();
+            if ((val = props.getByCommand(DTV_ISDBT_LAYERA_MODULATION)) != DTVProperties::UNKNOWN) {
+                params.layer_a_modulation = Modulation(val);
+            }
+            params.layer_a_segment_count.reset();
+            if ((val = props.getByCommand(DTV_ISDBT_LAYERA_SEGMENT_COUNT)) != DTVProperties::UNKNOWN) {
+                params.layer_a_segment_count = int(val);
+            }
+            params.layer_a_time_interleaving.reset();
+            if ((val = props.getByCommand(DTV_ISDBT_LAYERA_TIME_INTERLEAVING)) != DTVProperties::UNKNOWN) {
+                params.layer_a_time_interleaving = int(val);
+            }
+            params.layer_b_fec.reset();
+            if ((val = props.getByCommand(DTV_ISDBT_LAYERB_FEC)) != DTVProperties::UNKNOWN) {
+                params.layer_b_fec = InnerFEC(val);
+            }
+            params.layer_b_modulation.reset();
+            if ((val = props.getByCommand(DTV_ISDBT_LAYERB_MODULATION)) != DTVProperties::UNKNOWN) {
+                params.layer_b_modulation = Modulation(val);
+            }
+            params.layer_b_segment_count.reset();
+            if ((val = props.getByCommand(DTV_ISDBT_LAYERB_SEGMENT_COUNT)) != DTVProperties::UNKNOWN) {
+                params.layer_b_segment_count = int(val);
+            }
+            params.layer_b_time_interleaving.reset();
+            if ((val = props.getByCommand(DTV_ISDBT_LAYERB_TIME_INTERLEAVING)) != DTVProperties::UNKNOWN) {
+                params.layer_b_time_interleaving = int(val);
+            }
+            params.layer_c_fec.reset();
+            if ((val = props.getByCommand(DTV_ISDBT_LAYERC_FEC)) != DTVProperties::UNKNOWN) {
+                params.layer_c_fec = InnerFEC(val);
+            }
+            params.layer_c_modulation.reset();
+            if ((val = props.getByCommand(DTV_ISDBT_LAYERC_MODULATION)) != DTVProperties::UNKNOWN) {
+                params.layer_c_modulation = Modulation(val);
+            }
+            params.layer_c_segment_count.reset();
+            if ((val = props.getByCommand(DTV_ISDBT_LAYERC_SEGMENT_COUNT)) != DTVProperties::UNKNOWN) {
+                params.layer_c_segment_count = int(val);
+            }
+            params.layer_c_time_interleaving.reset();
+            if ((val = props.getByCommand(DTV_ISDBT_LAYERC_TIME_INTERLEAVING)) != DTVProperties::UNKNOWN) {
+                params.layer_c_time_interleaving = int(val);
+            }
+            return true;
+        }
         case DS_ISDB_C:
         case DS_DVB_H:
         case DS_ATSC_MH:
@@ -641,7 +821,7 @@ void ts::Tuner::Guts::discardFrontendEvents(Report& report)
 {
     ::dvb_frontend_event event;
     report.debug(u"starting discarding frontend events");
-    while (::ioctl(frontend_fd, FE_GET_EVENT, &event) >= 0) {
+    while (::ioctl(frontend_fd, ioctl_request_t(FE_GET_EVENT), &event) >= 0) {
         report.debug(u"one frontend event discarded");
     }
     report.debug(u"finished discarding frontend events");
@@ -656,7 +836,7 @@ bool ts::Tuner::Guts::tune(DTVProperties& props, Report& report)
 {
     report.debug(u"tuning on %s", {frontend_name});
     props.report(report, Severity::Debug);
-    if (::ioctl(frontend_fd, FE_SET_PROPERTY, props.getIoctlParam()) < 0) {
+    if (::ioctl(frontend_fd, ioctl_request_t(FE_SET_PROPERTY), props.getIoctlParam()) < 0) {
         const ErrorCode err = LastErrorCode();
         report.error(u"tuning error on %s: %s", {frontend_name, ErrorCodeMessage(err)});
         return false;
@@ -757,7 +937,7 @@ bool ts::Tuner::Guts::dishControl(const ModulationArgs& params, Report& report)
     cmd.msg[4] = 0x00;  // Unused
     cmd.msg[5] = 0x00;  // Unused
 
-    if (::ioctl(frontend_fd, FE_DISEQC_SEND_MASTER_CMD, &cmd) < 0) {
+    if (::ioctl(frontend_fd, ioctl_request_t(FE_DISEQC_SEND_MASTER_CMD), &cmd) < 0) {
         report.error(u"DVB frontend FE_DISEQC_SEND_MASTER_CMD error: %s", {ErrorCodeMessage()});
         return false;
     }
@@ -867,8 +1047,51 @@ bool ts::Tuner::tune(ModulationArgs& params, Report& report)
             props.addVar(DTV_INVERSION, params.inversion);
             break;
         }
-        case DS_ISDB_S:
-        case DS_ISDB_T:
+        case DS_ISDB_S: {
+            props.addVar(DTV_SYMBOL_RATE, params.symbol_rate);
+            props.addVar(DTV_INNER_FEC, params.inner_fec);
+            props.addVar(DTV_INVERSION, params.inversion);
+            break;
+        }
+        case DS_ISDB_T: {
+            props.addVar(DTV_INVERSION, params.inversion);
+            if (bwhz > 0) {
+                props.add(DTV_BANDWIDTH_HZ, bwhz);
+            }
+            props.addVar(DTV_TRANSMISSION_MODE, params.transmission_mode);
+            props.addVar(DTV_GUARD_INTERVAL, params.guard_interval);
+            props.addVar(DTV_ISDBT_SOUND_BROADCASTING, params.sound_broadcasting);
+            props.addVar(DTV_ISDBT_SB_SUBCHANNEL_ID, params.sb_subchannel_id);
+            props.addVar(DTV_ISDBT_SB_SEGMENT_COUNT, params.sb_segment_count);
+            props.addVar(DTV_ISDBT_SB_SEGMENT_IDX, params.sb_segment_index);
+            if (params.isdbt_layers.set()) {
+                const UString& layers(params.isdbt_layers.value());
+                uint32_t val = 0;
+                for (size_t i = 0; i < layers.size(); ++i) {
+                    switch (layers[i]) {
+                        case u'a': case u'A': val |= 0x01; break;
+                        case u'b': case u'B': val |= 0x02; break;
+                        case u'c': case u'C': val |= 0x04; break;
+                        default: break;
+                    }
+                }
+                props.add(DTV_ISDBT_LAYER_ENABLED, val);
+            }
+            props.add(DTV_ISDBT_PARTIAL_RECEPTION, params.isdbt_partial_reception.set() ? uint32_t(params.isdbt_partial_reception.value()) : uint32_t(-1));
+            props.add(DTV_ISDBT_LAYERA_FEC, params.layer_a_fec.set() ? uint32_t(params.layer_a_fec.value()) : uint32_t(::FEC_AUTO));
+            props.add(DTV_ISDBT_LAYERA_MODULATION, params.layer_a_modulation.set() ? uint32_t(params.layer_a_modulation.value()) : uint32_t(::QAM_AUTO));
+            props.add(DTV_ISDBT_LAYERA_SEGMENT_COUNT, params.layer_a_segment_count.set() ? uint32_t(params.layer_a_segment_count.value()) : uint32_t(-1));
+            props.add(DTV_ISDBT_LAYERA_TIME_INTERLEAVING, params.layer_a_time_interleaving.set() ? uint32_t(params.layer_a_time_interleaving.value()) : uint32_t(-1));
+            props.add(DTV_ISDBT_LAYERB_FEC, params.layer_b_fec.set() ? uint32_t(params.layer_b_fec.value()) : uint32_t(::FEC_AUTO));
+            props.add(DTV_ISDBT_LAYERB_MODULATION, params.layer_b_modulation.set() ? uint32_t(params.layer_b_modulation.value()) : uint32_t(::QAM_AUTO));
+            props.add(DTV_ISDBT_LAYERB_SEGMENT_COUNT, params.layer_b_segment_count.set() ? uint32_t(params.layer_b_segment_count.value()) : uint32_t(-1));
+            props.add(DTV_ISDBT_LAYERB_TIME_INTERLEAVING, params.layer_b_time_interleaving.set() ? uint32_t(params.layer_b_time_interleaving.value()) : uint32_t(-1));
+            props.add(DTV_ISDBT_LAYERC_FEC, params.layer_c_fec.set() ? uint32_t(params.layer_c_fec.value()) : uint32_t(::FEC_AUTO));
+            props.add(DTV_ISDBT_LAYERC_MODULATION, params.layer_c_modulation.set() ? uint32_t(params.layer_c_modulation.value()) : uint32_t(::QAM_AUTO));
+            props.add(DTV_ISDBT_LAYERC_SEGMENT_COUNT, params.layer_c_segment_count.set() ? uint32_t(params.layer_c_segment_count.value()) : uint32_t(-1));
+            props.add(DTV_ISDBT_LAYERC_TIME_INTERLEAVING, params.layer_c_time_interleaving.set() ? uint32_t(params.layer_c_time_interleaving.value()) : uint32_t(-1));
+            break;
+        }
         case DS_ISDB_C:
         case DS_DVB_H:
         case DS_ATSC_MH:
@@ -903,7 +1126,7 @@ bool ts::Tuner::start(Report& report)
     // Set demux buffer size (default value is 2 kB, fine for sections,
     // completely undersized for full TS capture.
 
-    if (::ioctl(_guts->demux_fd, DMX_SET_BUFFER_SIZE, _guts->demux_bufsize) < 0) {
+    if (::ioctl(_guts->demux_fd, ioctl_request_t(DMX_SET_BUFFER_SIZE), _guts->demux_bufsize) < 0) {
         report.error(u"error setting buffer size on %s: %s", {_guts->demux_name, ErrorCodeMessage()});
         return false;
     }
@@ -927,7 +1150,7 @@ bool ts::Tuner::start(Report& report)
     filter.pes_type = DMX_PES_OTHER;    // Any type of PES
     filter.flags = DMX_IMMEDIATE_START; // Start capture immediately
 
-    if (::ioctl(_guts->demux_fd, DMX_SET_PES_FILTER, &filter) < 0) {
+    if (::ioctl(_guts->demux_fd, ioctl_request_t(DMX_SET_PES_FILTER), &filter) < 0) {
         report.error(u"error setting filter on %s: %s", {_guts->demux_name, ErrorCodeMessage()});
         return false;
     }
@@ -976,7 +1199,7 @@ bool ts::Tuner::stop(Report& report)
     }
 
     // Stop the demux
-    if (::ioctl(_guts->demux_fd, DMX_STOP) < 0) {
+    if (::ioctl(_guts->demux_fd, ioctl_request_t(DMX_STOP)) < 0) {
         report.error(u"error stopping demux on %s: %s", {_guts->demux_name, ErrorCodeMessage()});
         return false;
     }
@@ -1393,7 +1616,7 @@ std::ostream& ts::Tuner::displayStatus(std::ostream& strm, const ts::UString& ma
     Display(strm, margin, u"  Tolerance", UString::Decimal(hz_factor * _guts->fe_info.frequency_tolerance), u"Hz");
 
     // Display symbol rate characteristics.
-    if (ttype == TT_DVB_S || ttype == TT_DVB_C) {
+    if (ttype == TT_DVB_S || ttype == TT_DVB_C || ttype == TT_ISDB_S || ttype == TT_ISDB_C) {
         const uint32_t symrate = params.symbol_rate.value(0);
         strm << margin << "Symbol rates:" << std::endl;
         if (symrate > 0) {

@@ -105,7 +105,7 @@ void ts::ByteBlock::copy(const void* data_, size_type size_)
 // Increase size by n and return pointer to new n-byte area
 //----------------------------------------------------------------------------
 
-void* ts::ByteBlock::enlarge(size_type n)
+uint8_t* ts::ByteBlock::enlarge(size_type n)
 {
     const size_type oldsize = this->size();
     resize(oldsize + n);
@@ -116,11 +116,9 @@ void* ts::ByteBlock::enlarge(size_type n)
 // Append an integer in Binary Coded Decimal (BCD) representation at the end.
 //----------------------------------------------------------------------------
 
-void ts::ByteBlock::appendBCD(uint32_t i, size_t bcd_count)
+void ts::ByteBlock::appendBCD(uint32_t value, size_t bcd_count, bool left_justified, uint8_t pad_nibble)
 {
-    const size_type oldsize = this->size();
-    resize(oldsize + (bcd_count + 1) / 2);
-    EncodeBCD(&(*this)[oldsize], bcd_count, i);
+    EncodeBCD(enlarge((bcd_count + 1) / 2), bcd_count, value, left_justified, pad_nibble);
 }
 
 //----------------------------------------------------------------------------

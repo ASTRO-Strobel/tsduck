@@ -34,8 +34,9 @@
 
 #pragma once
 #include "tsDirectShowGraph.h"
+#include "tsDirectShowNetworkType.h"
+#include "tsModulationArgs.h"
 #include "tsSinkFilter.h"
-#include "tsDeliverySystem.h"
 #include "tsVariable.h"
 
 namespace ts {
@@ -69,7 +70,16 @@ namespace ts {
         virtual ~TunerGraph();
 
         //!
+        //! Specify a receiver filter name.
+        //! Must be called before initialize(). The graph will use the specified receiver
+        //! filter instead of the standard algorithm.
+        //! @param [in] name Name of the receiver filter to use.
+        //!
+        void setReceiverName(const UString& name) { _user_receiver_name = name; }
+
+        //!
         //! Initialize the graph.
+        //! @param [in] tuner_name Tuner filter name (informational only).
         //! @param [in,out] tuner_moniker A moniker to create instances of a tuner filter.
         //! This tuner filter is the base of the graph creation (not the starting point
         //! of the graph, which is the network provider filter).
@@ -77,7 +87,7 @@ namespace ts {
         //! @param [in,out] report Where to report errors.
         //! @return True on success, false on error.
         //!
-        bool initialize(::IMoniker* tuner_moniker, DeliverySystemSet& delivery_systems, Report& report);
+        bool initialize(const UString& tuner_name, ::IMoniker* tuner_moniker, DeliverySystemSet& delivery_systems, Report& report);
 
         // Inherited methods.
         virtual void clear(Report& report) override;
@@ -90,19 +100,13 @@ namespace ts {
         SinkFilter* sinkFilter() const { return _sink_filter.pointer(); }
 
         //!
-        //! Get the tuning space of the graph.
-        //! @@@@ This function will be removed soon to support multi-standard tuners.
-        //! @return The address of the tuning space or a null pointer if the graph is not initialized.
-        //!
-        ::ITuningSpace* tuningSpace() { return _ituning_space.pointer(); }
-
-        //!
         //! Send a tune request.
-        //! @param [in] request Tune request.
+        //! @param [in,out] duck TSDuck execution context.
+        //! @param [in] params Modulation parameters.
         //! @param [in,out] report Where to report errors.
         //! @return True on success, false on error.
         //!
-        bool putTuneRequest(::ITuneRequest* request, Report& report);
+        bool sendTuneRequest(DuckContext& duck, const ModulationArgs& params, Report& report);
 
         //!
         //! Search criteria for properties.
@@ -152,7 +156,7 @@ namespace ts {
         //! Search a property, until found, in all interfaces of a given class and then in tuner properties.
         //! Same as previous method, with additional handling of unknown return value.
         //! @tparam VALTYPE The type of the property to search.
-        //! @tparam ARGTYPE 
+        //! @tparam ARGTYPE
         //! @tparam IVALTYPE The type of the property in the get_XXX() method of the object.
         //! @tparam FILTER The interface class through which the property can be found.
         //! @param [in] unset A value which, when returned by the interface, means "value is unset".
@@ -195,13 +199,14 @@ namespace ts {
 #endif
 
     private:
+        UString                        _user_receiver_name;  // User-specified receiver filter name.
+        UString                        _tuner_name;          // Name of the tuner filter.
         ComPtr<SinkFilter>             _sink_filter;         // Sink filter to TSDuck
         ComPtr<::IBaseFilter>          _provider_filter;     // Network provider filter
         ComPtr<::IBDA_NetworkProvider> _inet_provider;       // ... interface of _provider_filter
         ComPtr<::ITuner>               _ituner;              // ... interface of _provider_filter
-        ComPtr<::ITuningSpace>         _ituning_space;       // ... associated to _provider_filter
-        UString                        _tuning_space_fname;  // ... friendly name
-        UString                        _tuning_space_uname;  // ... unique name
+        ComPtr<::ITunerCap>            _ituner_cap;          // ... interface of _provider_filter
+        std::map<TunerType, DirectShowNetworkType>      _net_types;     // Map of network types for this tuner.
         ComPtr<::IBaseFilter>                           _tuner_filter;  // Tuner filter
         std::vector<ComPtr<::IBDA_DigitalDemodulator>>  _demods;        // ... all its demod interfaces
         std::vector<ComPtr<::IBDA_DigitalDemodulator2>> _demods2;       // ... all its demod (2nd gen) interfaces
@@ -215,20 +220,20 @@ namespace ts {
         //! @param [in,out] report Where to report errors.
         //! @return True on success, false on error.
         //!
-        bool buildCaptureGraph(const ComPtr<::IBaseFilter>& base, Report& report);
+        bool buildGraphAtTee(const ComPtr<::IBaseFilter>& base, Report& report);
 
         //!
-        //! Try to build the end of the graph, after the demux filter.
+        //! Try to build the end of the graph starting at the Transport Information Filter (TIF), after the demux filter.
         //! @param [in] demux Demux filter. The end of the graph is built from here.
         //! @param [in,out] report Where to report errors.
         //! @return True on success, false on error.
         //!
-        bool buildGraphEnd(const ComPtr<::IBaseFilter>& demux, Report& report);
+        bool buildGraphAtTIF(const ComPtr<::IBaseFilter>& demux, Report& report);
 
         //!
-        //! Try to install a "transport information filter" (TIF), after the demux filter.
-        //! @param [in] demux Demux filter.
-        //! @param [in] tif Transport informatio filter.
+        //! Try to install a Transport Information Filter (TIF), after the demux filter.
+        //! @param [in] demux Demux filter (already in the graph).
+        //! @param [in] tif The transport information filter to install.
         //! @param [in,out] report Where to report errors.
         //! @return True on success, false on error.
         //!
@@ -281,7 +286,7 @@ namespace ts {
         //! Search a property, until found, in all interfaces of a given class and then in tuner properties.
         //! Same as previous method, with additional handling of unknown return value.
         //! @tparam VALTYPE The type of the property to search.
-        //! @tparam ARGTYPE 
+        //! @tparam ARGTYPE
         //! @tparam IVALTYPE The type of the property in the get_XXX() method of the object.
         //! @tparam FILTER The interface class through which the property can be found.
         //! @param [in] unset A value which, when returned by the interface, means "value is unset".

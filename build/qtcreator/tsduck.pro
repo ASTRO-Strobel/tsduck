@@ -103,6 +103,7 @@ SUBDIRS += \
     tsplugin_teletext \
     tsplugin_time \
     tsplugin_timeref \
+    tsplugin_timeshift \
     tsplugin_trigger \
     tsplugin_tsrename \
     tsplugin_until \
@@ -123,6 +124,7 @@ SUBDIRS += \
     tslsdvb \
     tsp \
     tspacketize \
+    tspcontrol \
     tspsi \
     tsresync \
     tsscan \
