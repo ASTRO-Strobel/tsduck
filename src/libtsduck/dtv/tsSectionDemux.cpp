@@ -532,11 +532,20 @@ void ts::SectionDemux::processPacket(const TSPacket& pkt)
             }
         }
 
-        // Move to next section in the buffer
-
-        ts_start += section_length;
-        ts_size -= section_length;
-
+        if (pusi_section == nullptr || ts_size < section_length) {
+            // There is no PUSI later, skip the rest of the TS packet.
+            ts_size = 0;
+            break;
+        }
+        if (ts_start + section_length < pusi_section) {
+            // We can resync at a PUSI later in the TS buffer.
+            ts_size -= (pusi_section - ts_start);
+            ts_start = pusi_section;
+        } else {
+           // Move to next section in the buffer
+            ts_start += section_length;
+            ts_size -= section_length;
+        }
         // The next section necessarily starts in current packet
         pusi_pkt_index = _packet_count;
     }
@@ -547,6 +556,8 @@ void ts::SectionDemux::processPacket(const TSPacket& pkt)
     if (ts_size <= 0) {
         // TS buffer becomes empty
         pc.ts.clear();
+        // Section completed and no other data in packet sync with next PUSI.
+        pc.syncLost();
     }
     else if (ts_start > pc.ts.data()) {
         // Remove start of TS buffer
