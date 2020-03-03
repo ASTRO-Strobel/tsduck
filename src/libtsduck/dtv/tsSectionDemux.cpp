@@ -396,7 +396,9 @@ void ts::SectionDemux::processPacket(const TSPacket& pkt)
 
         if (section_length > MAX_PRIVATE_SECTION_SIZE ||
             section_length < MIN_SHORT_SECTION_SIZE ||
-            (long_header && section_length < MIN_LONG_SECTION_SIZE))
+            (long_header && section_length < MIN_LONG_SECTION_SIZE) ||
+            (pusi_section != nullptr && ts_start < pusi_section 
+            && section_length > (size_t)(pusi_section - ts_start))) // last section not finished before next is starting
         {
             _status.inv_sect_length++;
             if (pusi_section != nullptr && ts_start < pusi_section) {
