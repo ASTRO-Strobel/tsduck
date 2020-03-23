@@ -28,45 +28,56 @@
 //----------------------------------------------------------------------------
 //!
 //!  @file
-//!  Base class for AVC sub-structures inside access units.
-//!  AVC is Advanced Video Coding, ISO 14496-10, ITU H.264.
+//!  Representation of a J2K_video_descriptor
 //!
 //----------------------------------------------------------------------------
 
 #pragma once
-#include "tsAbstractAVCData.h"
-#include "tsAVCParser.h"
+#include "tsAbstractDescriptor.h"
 
 namespace ts {
-
     //!
-    //! Base class for AVC sub-structures inside access units.
-    //! AVC is Advanced Video Coding, ISO 14496-10, ITU H.264.
-    //! @ingroup mpeg
+    //! Representation of a J2K_video_descriptor.
     //!
-    class TSDUCKDLL AbstractAVCStructure: public AbstractAVCData
+    //! @see ISO/IEC 13818-1, ITU-T Rec. H.222.0, 2.6.80.
+    //! @ingroup descriptor
+    //!
+    class TSDUCKDLL J2KVideoDescriptor : public AbstractDescriptor
     {
     public:
-        //!
-        //! Unified name for superclass.
-        //!
-        typedef AbstractAVCData SuperClass;
+        // Public members:
+        uint16_t  profile_and_level;    //!< Same as J2K concept.
+        uint32_t  horizontal_size;      //!< Same as J2K concept.
+        uint32_t  vertical_size;        //!< Same as J2K concept.
+        uint32_t  max_bit_rate;         //!< Same as J2K concept.
+        uint32_t  max_buffer_size;      //!< Same as J2K concept.
+        uint16_t  DEN_frame_rate;       //!< Same as J2K concept.
+        uint16_t  NUM_frame_rate;       //!< Same as J2K concept.
+        uint8_t   color_specification;  //!< Same as J2K concept.
+        bool      still_mode;           //!< Same as J2K concept.
+        bool      interlaced_video;     //!< Same as J2K concept.
+        ByteBlock private_data;         //!< Private data
 
         //!
-        //! Constructor.
+        //! Default constructor.
         //!
-        AbstractAVCStructure() = default;
-
-        // Inherited
-        virtual bool parse(const void* addr, size_t size) override;
+        J2KVideoDescriptor();
 
         //!
-        //! Parse the structure.
-        //! Must be reimplemented by subclasses.
-        //! The data are marked as valid or invalid.
-        //! @param [in,out] parser The parser of an AVC stream.
-        //! @return The @link valid @endlink flag.
+        //! Constructor from a binary descriptor
+        //! @param [in,out] duck TSDuck execution context.
+        //! @param [in] bin A binary descriptor to deserialize.
         //!
-        virtual bool parse(AVCParser& parser) = 0;
+        J2KVideoDescriptor(DuckContext& duck, const Descriptor& bin);
+
+        // Inherited methods
+        virtual void serialize(DuckContext&, Descriptor&) const override;
+        virtual void deserialize(DuckContext&, const Descriptor&) override;
+        virtual void fromXML(DuckContext&, const xml::Element*) override;
+        DeclareDisplayDescriptor();
+
+    protected:
+        // Inherited methods
+        virtual void buildXML(DuckContext&, xml::Element*) const override;
     };
 }

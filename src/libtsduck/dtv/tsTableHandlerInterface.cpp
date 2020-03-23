@@ -30,8 +30,6 @@
 #include "tsTableHandlerInterface.h"
 TSDUCK_SOURCE;
 
-// Default implementation.
-
 ts::TableHandlerInterface::~TableHandlerInterface()
 {
 }

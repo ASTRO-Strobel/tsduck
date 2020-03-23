@@ -30,8 +30,6 @@
 #include "tsSectionHandlerInterface.h"
 TSDUCK_SOURCE;
 
-// Default implementation.
-
 ts::SectionHandlerInterface::~SectionHandlerInterface()
 {
 }

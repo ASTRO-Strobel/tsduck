@@ -45,28 +45,25 @@ TS_MAIN(MainCode);
 //  Command line options
 //----------------------------------------------------------------------------
 
-class Options: public ts::Args
-{
-    TS_NOBUILD_NOCOPY(Options);
-public:
-    Options(int argc, char *argv[]);
-    virtual ~Options();
+namespace {
+    class Options: public ts::Args
+    {
+        TS_NOBUILD_NOCOPY(Options);
+    public:
+        Options(int argc, char *argv[]);
 
-    ts::DuckContext           duck;
-    bool                      continuous; // Continuous packetization
-    ts::CyclingPacketizer::StuffingPolicy stuffing_policy;
-    ts::CRC32::Validation     crc_op;     // Validate/recompute CRC32
-    ts::PID                   pid;        // Target PID
-    ts::BitRate               bitrate;    // Target PID bitrate
-    ts::UString               outfile;    // Output file
-    ts::FileNameRateList      infiles;    // Input file names and repetition rates
-    ts::SectionFile::FileType inType;     // Input files type
-};
+        ts::DuckContext           duck;
+        bool                      continuous; // Continuous packetization
+        ts::CyclingPacketizer::StuffingPolicy stuffing_policy;
+        ts::CRC32::Validation     crc_op;     // Validate/recompute CRC32
+        ts::PID                   pid;        // Target PID
+        ts::BitRate               bitrate;    // Target PID bitrate
+        ts::UString               outfile;    // Output file
+        ts::FileNameRateList      infiles;    // Input file names and repetition rates
+        ts::SectionFile::FileType inType;     // Input files type
+    };
+}
 
-// Destructor.
-Options::~Options() {}
-
-// Constructor.
 Options::Options(int argc, char *argv[]) :
     Args(u"Packetize PSI/SI sections in a transport stream PID", u"[options] [input-file[=rate] ...]"),
     duck(this),

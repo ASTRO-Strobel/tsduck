@@ -56,27 +56,24 @@ const ts::StaticReferencesDVB dependenciesForStaticLib;
 //  Command line options
 //----------------------------------------------------------------------------
 
-class Options: public ts::Args
-{
-    TS_NOBUILD_NOCOPY(Options);
-public:
-    Options(int argc, char *argv[]);
-    virtual ~Options();
+namespace {
+    class Options: public ts::Args
+    {
+        TS_NOBUILD_NOCOPY(Options);
+    public:
+        Options(int argc, char *argv[]);
 
-    ts::DuckContext   duck;              // TSDuck execution context.
-    ts::TablesDisplay display;           // Options about displaying tables
-    ts::PagerArgs     pager;             // Output paging options.
-    ts::UDPReceiver   udp;               // Options about receiving UDP tables
-    ts::UStringVector infiles;           // Input file names
-    size_t            max_tables;        // Max number of tables to dump.
-    size_t            max_invalid_udp;   // Max number of invalid UDP messages before giving up.
-    bool              no_encapsulation;  // Raw sections in UDP messages.
-};
+        ts::DuckContext   duck;              // TSDuck execution context.
+        ts::TablesDisplay display;           // Options about displaying tables
+        ts::PagerArgs     pager;             // Output paging options.
+        ts::UDPReceiver   udp;               // Options about receiving UDP tables
+        ts::UStringVector infiles;           // Input file names
+        size_t            max_tables;        // Max number of tables to dump.
+        size_t            max_invalid_udp;   // Max number of invalid UDP messages before giving up.
+        bool              no_encapsulation;  // Raw sections in UDP messages.
+    };
+}
 
-// Destructor.
-Options::~Options() {}
-
-// Constructor.
 Options::Options(int argc, char *argv[]) :
     Args(u"Dump PSI/SI tables, as saved by tstables", u"[options] [filename ...]"),
     duck(this),

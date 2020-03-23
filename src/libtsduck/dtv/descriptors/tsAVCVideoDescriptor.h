@@ -39,10 +39,7 @@ namespace ts {
     //!
     //! Representation of an AVC_video_descriptor.
     //!
-    //! This MPG-defined descriptor is not defined in ISO/IEC 13818-1,
-    //! ITU-T Rec. H.222.0. See its "Amendment 3: Transport of AVC video
-    //! over ITU-T Rec. H.222.0 | ISO/IEC 13818-1 streams" (document W5771),
-    //! section 2.6.54.
+    //! @see ISO/IEC 13818-1, ITU-T Rec. H.222.0, 2.6.64.
     //! @ingroup descriptor
     //!
     class TSDUCKDLL AVCVideoDescriptor : public AbstractDescriptor

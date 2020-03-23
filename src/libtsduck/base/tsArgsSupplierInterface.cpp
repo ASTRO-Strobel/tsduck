@@ -30,9 +30,6 @@
 #include "tsArgsSupplierInterface.h"
 TSDUCK_SOURCE;
 
-
-// Default implementation.
-
 ts::ArgsSupplierInterface::~ArgsSupplierInterface()
 {
 }

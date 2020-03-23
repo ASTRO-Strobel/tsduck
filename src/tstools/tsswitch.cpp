@@ -64,23 +64,19 @@ TS_MAIN(MainCode);
 //  Command line options
 //----------------------------------------------------------------------------
 
-class TSSwitchOptions: public ts::ArgsWithPlugins
-{
-    TS_NOBUILD_NOCOPY(TSSwitchOptions);
-public:
-    TSSwitchOptions(int argc, char *argv[]);
-    virtual ~TSSwitchOptions();
+namespace {
+    class TSSwitchOptions: public ts::ArgsWithPlugins
+    {
+        TS_NOBUILD_NOCOPY(TSSwitchOptions);
+    public:
+        TSSwitchOptions(int argc, char *argv[]);
 
-    // Option values
-    ts::DuckContext       duck;         // TSDuck context
-    ts::AsyncReportArgs   log_args;     // Asynchronous logger arguments.
-    ts::InputSwitcherArgs switch_args;  // TS processing arguments.
-};
+        ts::DuckContext       duck;         // TSDuck context
+        ts::AsyncReportArgs   log_args;     // Asynchronous logger arguments.
+        ts::InputSwitcherArgs switch_args;  // TS processing arguments.
+    };
+}
 
-// Destructor.
-TSSwitchOptions::~TSSwitchOptions() {}
-
-// Constructor.
 TSSwitchOptions::TSSwitchOptions(int argc, char *argv[]) :
     ts::ArgsWithPlugins(0, UNLIMITED_COUNT, 0, 0, 0, 1),
     duck(this),

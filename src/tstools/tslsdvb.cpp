@@ -48,25 +48,21 @@ TS_MAIN(MainCode);
 //  Command line options
 //----------------------------------------------------------------------------
 
-class Options: public ts::Args
-{
-    TS_NOBUILD_NOCOPY(Options);
-public:
-    Options(int argc, char *argv[]);
-    virtual ~Options();
+namespace {
+    class Options: public ts::Args
+    {
+        TS_NOBUILD_NOCOPY(Options);
+    public:
+        Options(int argc, char *argv[]);
 
 #if defined(TS_WINDOWS)
-    ts::DirectShowTest::TestType test_type;  // DirectShow test (Windows only).
+        ts::DirectShowTest::TestType test_type;  // DirectShow test (Windows only).
 #endif
+        ts::DuckContext duck;
+        ts::TunerArgs   tuner_args;  // Name of device to list (unspecified means all).
+    };
+}
 
-    ts::DuckContext duck;
-    ts::TunerArgs   tuner_args;  // Name of device to list (unspecified means all).
-};
-
-// Destructor.
-Options::~Options() {}
-
-// Constructor.
 Options::Options(int argc, char *argv[]) :
     ts::Args(u"List DVB tuner devices", u"[options]"),
 #if defined(TS_WINDOWS)
